@@ -53,11 +53,11 @@
   <h2>Data Analyzer</h2>
 
   <div class="control-panel">
-    <label for="csvFile" class="custom-file-upload">📁 Выберите файл</label>
+    <label for="csvFile" class="custom-file-upload">📁 Choose File</label>
     <input type="file" id="csvFile" accept=".csv">
 
     <div>
-      <label for="comparisonType">Группировать по:</label>
+      <label for="comparisonType">Group by:</label>
       <select id="comparisonType">
         <option value="Site/Application">Site/Application</option>
         <option value="Ad system">Ad system</option>
@@ -65,20 +65,20 @@
     </div>
     
     <div>
-        <label for="period1">Период 1:</label>
+        <label for="period1">Period 1:</label>
         <select id="period1"></select>
     </div>
 
     <div>
-        <label for="period2">Период 2:</label>
+        <label for="period2">Period 2:</label>
         <select id="period2"></select>
     </div>
   </div>
   
   <div class="control-panel">
-    <button id="compareBtn"><i data-lucide="bar-chart-3"></i> Сравнить</button>
-    <button id="exportBtn"><i data-lucide="download"></i> Экспорт</button>
-    <button id="filterBtn"><i data-lucide="flag"></i> Только с флагом</button>
+    <button id="compareBtn"><i data-lucide="bar-chart-3"></i> Compare</button>
+    <button id="exportBtn"><i data-lucide="download"></i> Export</button>
+    <button id="filterBtn"><i data-lucide="flag"></i> Only triggers</button>
   </div>
 
   <div style="overflow-x:auto;">
