@@ -3,7 +3,7 @@ lucide.createIcons();
 let parsedData = [];
 let numericHeaders = [];
 let lastRenderedRows = [];
-let currentlyDisplayedRows = []; // переменная хранит то что сейчас на экране
+let currentlyDisplayedRows = [];
 let isFilterActive = false;
 let periodColumnName = '';
 let revenueColumnName = '';
@@ -194,7 +194,7 @@ filterBtn.addEventListener("click", () => {
     renderTable(currentlyDisplayedRows, groupBy);
 });
 
-// ===== ЭКСПОРТ =====
+// ===== EXPORT =====
 exportBtn.addEventListener("click", () => {
     if (currentlyDisplayedRows.length === 0) {
         alert("No data to export.");
@@ -218,29 +218,30 @@ exportBtn.addEventListener("click", () => {
     const csvRows = [];
     csvRows.push(headers.map(h => `"${h}"`).join(','));
 
-    // для экспорта того, что видит пользователь
     currentlyDisplayedRows.forEach(item => {
-        let isFirstRowForEntity = true;
         for (const metricName in item.metrics) {
             const metricData = item.metrics[metricName];
             const row = [];
 
-            row.push(isFirstRowForEntity ? item.key : '');
+            // always repeat the main info for every metric row
+            row.push(item.key);
             if (isSiteMode) {
-                row.push(isFirstRowForEntity ? (item.meta.manager || '') : '');
-                row.push(isFirstRowForEntity ? (item.meta.client || '') : '');
+                row.push(item.meta.manager || '');
+                row.push(item.meta.client || '');
             } else {
                 row.push('');
                 row.push('');
             }
+            
             row.push(metricName);
             row.push(metricData.val1.toFixed(2));
             row.push(metricData.val2.toFixed(2));
             row.push(`${(metricData.changePct * 100).toFixed(2)}%`);
-            row.push(isFirstRowForEntity ? (item.flag || '') : '');
+            
+            // always repeat the flag for every metric row
+            row.push(item.flag || '');
             
             csvRows.push(row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','));
-            isFirstRowForEntity = false;
         }
     });
 
@@ -248,6 +249,6 @@ exportBtn.addEventListener("click", () => {
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "comparison_results.csv";
+    link.download = "comparison_results_flat.csv"; // changed name to reflect new format
     link.click();
 });
