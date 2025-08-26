@@ -26,7 +26,7 @@ csvInput.addEventListener("change", (event) => {
         dynamicTyping: true,
         complete: function (results) {
             if (!results.data.length || !results.data[0]) {
-                alert("Файл пуст или содержит некорректные данные.");
+                alert("File is empty or contains invalid data.");
                 return;
             }
             const headers = Object.keys(results.data[0]);
@@ -34,12 +34,12 @@ csvInput.addEventListener("change", (event) => {
             else if (headers.includes('Month')) periodColumnName = 'Month';
             else if (headers.includes('Week')) periodColumnName = 'Week';
             else {
-                alert('Ошибка: Не удалось найти столбец с периодом (должен называться Date, Month или Week).');
+                alert('Error: Could not find a period column (must be named Date, Month, or Week).');
                 return;
             }
             parsedData = results.data.filter(row => row && row[periodColumnName] != null && (row["Site/Application"] || row["Ad system"]));
             if (parsedData.length === 0) {
-                 alert(`Ошибка: Найдено 0 строк с данными. Проверьте, что в файле есть столбец '${periodColumnName}' и он заполнен.`);
+                 alert(`Error: Found 0 rows with data. Please check that the file contains the column '${periodColumnName}' and that it is filled.`);
                  return;
             }
             const nonMetricCols = ['Date', 'Month', 'Week', 'Site/Application', 'Customer Success Manager', 'Client', 'Ad system'];
@@ -48,10 +48,10 @@ csvInput.addEventListener("change", (event) => {
             revenueColumnName = numericHeaders.find(h => h.toLowerCase().includes('revenue'));
             if (!revenueColumnName) {
                 revenueColumnName = numericHeaders.length > 0 ? numericHeaders[0] : '';
-                alert(`Внимание: колонка с 'Revenue' не найдена. Флаг будет считаться по первой метрике: '${revenueColumnName}'.`);
+                alert(`Warning: 'Revenue' column not found. The flag will be based on the first metric: '${revenueColumnName}'.`);
             }
             populatePeriodSelectors();
-            alert(`Файл загружен. Найдено ${parsedData.length} строк. Флаг будет считаться по колонке '${revenueColumnName}'.`);
+            alert(`File loaded successfully. Found ${parsedData.length} rows. The flag will be based on the '${revenueColumnName}' column.`);
         },
     });
 });
@@ -94,7 +94,7 @@ compareBtn.addEventListener("click", () => {
     const period2 = period2Select.value;
     const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
     if (!period1 || !period2 || period1 === period2) {
-        alert("Пожалуйста, выберите два разных периода для сравнения.");
+        alert("Please select two different periods to compare.");
         return;
     }
     const dataByEntity = {};
@@ -134,7 +134,7 @@ compareBtn.addEventListener("click", () => {
     lastRenderedRows = results;
     currentlyDisplayedRows = results;
     isFilterActive = false;
-    filterBtn.textContent = "Только с флагом";
+    filterBtn.textContent = "Flagged Only";
     renderTable(results, groupBy);
 });
 
@@ -145,11 +145,11 @@ function renderTable(data, groupBy) {
     if (groupBy === 'Site/Application') {
         headerHtml += `<th>CS Manager</th><th>Client</th>`;
     }
-    headerHtml += `<th>Метрика</th><th>Период 1 (${period1Select.value})</th><th>Период 2 (${period2Select.value})</th><th>% Изменение</th><th>Флаг (по ${revenueColumnName})</th>`;
+    headerHtml += `<th>Metric</th><th>Period 1 (${period1Select.value})</th><th>Period 2 (${period2Select.value})</th><th>% Change</th><th>Flag (on ${revenueColumnName})</th>`;
     thead.innerHTML = `<tr>${headerHtml}</tr>`;
     tbody.innerHTML = "";
     if (data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8">Нет данных для отображения.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8">No data to display.</td></tr>`;
         return;
     }
     data.forEach(item => {
@@ -186,10 +186,10 @@ filterBtn.addEventListener("click", () => {
     isFilterActive = !isFilterActive;
     if (isFilterActive) {
         currentlyDisplayedRows = lastRenderedRows.filter(r => r.flag === 'YES');
-        filterBtn.textContent = "Показать все";
+        filterBtn.textContent = "Show All";
     } else {
         currentlyDisplayedRows = lastRenderedRows;
-        filterBtn.textContent = "Только с флагом";
+        filterBtn.textContent = "Flagged Only";
     }
     renderTable(currentlyDisplayedRows, groupBy);
 });
@@ -197,7 +197,7 @@ filterBtn.addEventListener("click", () => {
 // ===== ЭКСПОРТ =====
 exportBtn.addEventListener("click", () => {
     if (currentlyDisplayedRows.length === 0) {
-        alert("Нет данных для экспорта.");
+        alert("No data to export.");
         return;
     }
 
@@ -208,11 +208,11 @@ exportBtn.addEventListener("click", () => {
         groupBy,
         'CS Manager',
         'Client',
-        'Метрика',
-        `Период 1 (${period1Select.value})`,
-        `Период 2 (${period2Select.value})`,
-        '% Изменение',
-        `Флаг (по ${revenueColumnName})`
+        'Metric',
+        `Period 1 (${period1Select.value})`,
+        `Period 2 (${period2Select.value})`,
+        '% Change',
+        `Flag (on ${revenueColumnName})`
     ];
 
     const csvRows = [];
