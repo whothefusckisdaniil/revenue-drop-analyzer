@@ -1,231 +1,253 @@
-let parsedData = []
-let availableDates = []
-let headers = {}
-let lastRenderedRows = []
-let filterActive = false
+lucide.createIcons();
 
-const csvInput = document.getElementById("csvFile")
-const date1Select = document.getElementById("date1")
-const date2Select = document.getElementById("date2")
-const compareBtn = document.getElementById("compareBtn")
-const exportBtn = document.getElementById("exportBtn")
-const resultsBody = document.querySelector("#resultsTable tbody")
-const filterBtn = document.getElementById("filterBtn")
+let parsedData = [];
+let numericHeaders = [];
+let lastRenderedRows = [];
+let currentlyDisplayedRows = []; // переменная хранит то что сейчас на экране
+let isFilterActive = false;
+let periodColumnName = '';
+let revenueColumnName = '';
 
-let fileType = "site" // site или adSystem
-
-// ——— смена заголовков
-function resetTableHeader(type = fileType) {
-  const theadRow = document.querySelector("#resultsTable thead tr")
-  if (!theadRow) return
-  if (type === "adSystem") {
-    theadRow.innerHTML = `
-      <th>Ad system</th>
-      <th>Revenue Date 1</th>
-      <th>Revenue Date 2</th>
-      <th>% Drop</th>
-      <th>$ Drop</th>
-      <th>Flag</th>
-    `
-  } else {
-    theadRow.innerHTML = `
-      <th>Site/Application</th>
-      <th>CS Manager</th>
-      <th>Client</th>
-      <th>Revenue Date 1</th>
-      <th>Revenue Date 2</th>
-      <th>% Drop</th>
-      <th>$ Drop</th>
-      <th>Flag</th>
-    `
-  }
-}
+const csvInput = document.getElementById("csvFile");
+const compareBtn = document.getElementById("compareBtn");
+const exportBtn = document.getElementById("exportBtn");
+const filterBtn = document.getElementById("filterBtn");
+const resultsTable = document.getElementById("resultsTable");
+const comparisonTypeSelect = document.getElementById("comparisonType");
+const period1Select = document.getElementById("period1");
+const period2Select = document.getElementById("period2");
 
 csvInput.addEventListener("change", (event) => {
-  const file = event.target.files[0]
-  if (file) {
+    const file = event.target.files[0];
+    if (!file) return;
     Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: function (results) {
-        const cols = Object.keys(results.data[0] || {})
-        if (cols.includes("Ad system")) {
-          fileType = "adSystem"
-          parsedData = results.data.filter(
-            (row) => row["Date"] && row["Ad system"] && row["Revenue Ad system"]
-          )
-        } else {
-          fileType = "site"
-          parsedData = results.data.filter(
-            (row) => row["Date"] && row["Revenue Ad system"] && row["Site/Application"] && !row["Site/Application"].includes("_pau")
-          )
-        }
+        header: true,
+        skipEmptyLines: true,
+        dynamicTyping: true,
+        complete: function (results) {
+            if (!results.data.length || !results.data[0]) {
+                alert("Файл пуст или содержит некорректные данные.");
+                return;
+            }
+            const headers = Object.keys(results.data[0]);
+            if (headers.includes('Date')) periodColumnName = 'Date';
+            else if (headers.includes('Month')) periodColumnName = 'Month';
+            else if (headers.includes('Week')) periodColumnName = 'Week';
+            else {
+                alert('Ошибка: Не удалось найти столбец с периодом (должен называться Date, Month или Week).');
+                return;
+            }
+            parsedData = results.data.filter(row => row && row[periodColumnName] != null && (row["Site/Application"] || row["Ad system"]));
+            if (parsedData.length === 0) {
+                 alert(`Ошибка: Найдено 0 строк с данными. Проверьте, что в файле есть столбец '${periodColumnName}' и он заполнен.`);
+                 return;
+            }
+            const nonMetricCols = ['Date', 'Month', 'Week', 'Site/Application', 'Customer Success Manager', 'Client', 'Ad system'];
+            numericHeaders = Object.keys(results.data[0]).filter(key => 
+                !nonMetricCols.includes(key) && typeof results.data[0][key] === 'number');
+            revenueColumnName = numericHeaders.find(h => h.toLowerCase().includes('revenue'));
+            if (!revenueColumnName) {
+                revenueColumnName = numericHeaders.length > 0 ? numericHeaders[0] : '';
+                alert(`Внимание: колонка с 'Revenue' не найдена. Флаг будет считаться по первой метрике: '${revenueColumnName}'.`);
+            }
+            populatePeriodSelectors();
+            alert(`Файл загружен. Найдено ${parsedData.length} строк. Флаг будет считаться по колонке '${revenueColumnName}'.`);
+        },
+    });
+});
 
-        if (!parsedData.length) {
-          alert("No valid data rows found.")
-          return
-        }
+function detectDataType(periodValue) {
+    if (typeof periodValue !== 'string' && !isNaN(periodValue)) return 'numeric';
+    if (typeof periodValue === 'string' && /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/i.test(periodValue)) return 'monthly_name';
+    if (typeof periodValue === 'string' && !isNaN(new Date(periodValue).getTime())) return 'daily';
+    return 'unknown';
+}
 
-        resetTableHeader(fileType)
-        populateDateSelectors()
-      },
-    })
-  }
-})
-
-function populateDateSelectors() {
-  const datesSet = new Set(parsedData.map((row) => row["Date"]))
-  availableDates = Array.from(datesSet).sort()
-
-  date1Select.innerHTML = ""
-  date2Select.innerHTML = ""
-  availableDates.forEach((date) => {
-    date1Select.appendChild(new Option(date, date))
-    date2Select.appendChild(new Option(date, date))
-  })
+function populatePeriodSelectors() {
+    const periodSet = new Set(parsedData.map(row => row[periodColumnName]));
+    let availablePeriods = Array.from(periodSet);
+    const dataType = availablePeriods.length > 0 ? detectDataType(availablePeriods[0]) : 'unknown';
+    if (dataType === 'monthly_name') {
+        const monthOrder = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        availablePeriods.sort((a, b) => {
+            const [monthA, yearA] = a.split(' ');
+            const [monthB, yearB] = b.split(' ');
+            if (yearA !== yearB) return yearB - yearA;
+            return monthOrder.indexOf(monthB) - monthOrder.indexOf(monthA);
+        });
+    } else if (dataType === 'numeric') {
+        availablePeriods.sort((a, b) => Number(b) - Number(a));
+    } else if (dataType === 'daily') {
+        availablePeriods.sort((a, b) => new Date(b) - new Date(a));
+    }
+    period1Select.innerHTML = "";
+    period2Select.innerHTML = "";
+    availablePeriods.forEach(period => {
+        period1Select.add(new Option(period, period));
+        period2Select.add(new Option(period, period));
+    });
+    if (period2Select.options.length > 1) period2Select.selectedIndex = 1;
 }
 
 compareBtn.addEventListener("click", () => {
-  if (fileType === "adSystem") {
-    compareByAdSystem()
-  } else {
-    compareBySite()
-  }
-})
+    const period1 = period1Select.value;
+    const period2 = period2Select.value;
+    const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
+    if (!period1 || !period2 || period1 === period2) {
+        alert("Пожалуйста, выберите два разных периода для сравнения.");
+        return;
+    }
+    const dataByEntity = {};
+    parsedData.forEach(row => {
+        if (row[periodColumnName] == period1 || row[periodColumnName] == period2) {
+            const key = row[groupBy];
+            if (!key) return;
+            if (!dataByEntity[key]) dataByEntity[key] = {};
+            const metrics = {};
+            numericHeaders.forEach(h => metrics[h] = row[h] || 0);
+            dataByEntity[key][row[periodColumnName]] = {
+                metrics,
+                meta: { manager: row['Customer Success Manager'], client: row['Client'] }
+            };
+        }
+    });
+    const results = [];
+    for (const key in dataByEntity) {
+        const entityData1 = dataByEntity[key][period1];
+        const entityData2 = dataByEntity[key][period2];
+        if (!entityData1 || !entityData2) continue;
+        const metricsComparison = {};
+        numericHeaders.forEach(metric => {
+            const val1 = entityData1.metrics[metric] || 0;
+            const val2 = entityData2.metrics[metric] || 0;
+            const changePct = val1 !== 0 ? (val2 - val1) / val1 : 0;
+            metricsComparison[metric] = { val1, val2, changePct };
+        });
+        const rev1 = entityData1.metrics[revenueColumnName] || 0;
+        const rev2 = entityData2.metrics[revenueColumnName] || 0;
+        if (rev1 === 0) continue;
+        const dropAmt = rev1 - rev2;
+        const dropPct = (rev1 - rev2) / rev1;
+        const flag = rev2 < rev1 && dropAmt > 100 && dropPct > 0.05 ? "YES" : "";
+        results.push({ key, meta: entityData1.meta, metrics: metricsComparison, flag });
+    }
+    lastRenderedRows = results;
+    currentlyDisplayedRows = results;
+    isFilterActive = false;
+    filterBtn.textContent = "Только с флагом";
+    renderTable(results, groupBy);
+});
 
-// ---- проверка (site) ----
-function compareBySite() {
-  const date1 = date1Select.value
-  const date2 = date2Select.value
-  if (!date1 || !date2 || date1 === date2) {
-    alert("Please select two different dates.")
-    return
-  }
-
-  const bySite = {}
-  parsedData.forEach((row) => {
-    const key = `${row["Site/Application"]}|${row["Customer Success Manager"]}|${row["Client"]}`
-    if (!bySite[key]) bySite[key] = {}
-    bySite[key][row["Date"]] = parseFloat(row["Revenue Ad system"]) || 0
-  })
-
-  const rows = []
-  for (const key in bySite) {
-    const [site, manager, client] = key.split("|")
-    const rev1 = bySite[key][date1] || 0
-    const rev2 = bySite[key][date2] || 0
-    if (rev1 === 0) continue
-
-    const dropPct = (rev1 - rev2) / rev1
-    const dropAmt = rev1 - rev2
-    const flag = rev2 < rev1 && dropAmt > 100 && dropPct > 0.1 ? "YES" : ""
-
-    rows.push({ site, manager, client, rev1, rev2, dropPct, dropAmt, flag })
-  }
-
-  renderTable(rows, "site")
-  filterBtn.style.display = "inline-block"
-  filterBtn.textContent = "Show Only Flagged"
-  filterActive = false
+function renderTable(data, groupBy) {
+    const thead = resultsTable.querySelector("thead");
+    const tbody = resultsTable.querySelector("tbody");
+    let headerHtml = `<th>${groupBy}</th>`;
+    if (groupBy === 'Site/Application') {
+        headerHtml += `<th>CS Manager</th><th>Client</th>`;
+    }
+    headerHtml += `<th>Метрика</th><th>Период 1 (${period1Select.value})</th><th>Период 2 (${period2Select.value})</th><th>% Изменение</th><th>Флаг (по ${revenueColumnName})</th>`;
+    thead.innerHTML = `<tr>${headerHtml}</tr>`;
+    tbody.innerHTML = "";
+    if (data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8">Нет данных для отображения.</td></tr>`;
+        return;
+    }
+    data.forEach(item => {
+        const numMetrics = Object.keys(item.metrics).length;
+        let isFirstRowForEntity = true;
+        for (const metricName in item.metrics) {
+            const metricData = item.metrics[metricName];
+            const tr = document.createElement("tr");
+            let rowHtml = '';
+            if (isFirstRowForEntity) {
+                rowHtml += `<td rowspan="${numMetrics}">${item.key}</td>`;
+                 if (groupBy === 'Site/Application') {
+                    rowHtml += `<td rowspan="${numMetrics}">${item.meta.manager || ''}</td>`;
+                    rowHtml += `<td rowspan="${numMetrics}">${item.meta.client || ''}</td>`;
+                }
+            }
+            const changeColor = metricData.changePct < 0 ? 'color:red;' : 'color:lightgreen;';
+            rowHtml += `<td>${metricName}</td>`;
+            rowHtml += `<td>${metricData.val1.toFixed(2)}</td>`;
+            rowHtml += `<td>${metricData.val2.toFixed(2)}</td>`;
+            rowHtml += `<td style="${changeColor}">${(metricData.changePct * 100).toFixed(1)}%</td>`;
+            if (isFirstRowForEntity) {
+                 rowHtml += `<td rowspan="${numMetrics}" class="${item.flag === 'YES' ? 'flagged' : ''}">${item.flag}</td>`;
+            }
+            tr.innerHTML = rowHtml;
+            tbody.appendChild(tr);
+            isFirstRowForEntity = false;
+        }
+    });
 }
 
-// ---- проверка (adSystem) ----
-function compareByAdSystem() {
-  const date1 = date1Select.value
-  const date2 = date2Select.value
-  if (!date1 || !date2 || date1 === date2) {
-    alert("Please select two different dates.")
-    return
-  }
-
-  const bySystem = {}
-  parsedData.forEach((row) => {
-    const key = row["Ad system"]
-    if (!bySystem[key]) bySystem[key] = {}
-    bySystem[key][row["Date"]] = parseFloat(row["Revenue Ad system"]) || 0
-  })
-
-  const rows = []
-  for (const adSystem in bySystem) {
-    const rev1 = bySystem[adSystem][date1] || 0
-    const rev2 = bySystem[adSystem][date2] || 0
-    if (rev1 === 0) continue
-
-    const dropPct = (rev1 - rev2) / rev1
-    const dropAmt = rev1 - rev2
-    const flag = rev2 < rev1 && dropAmt > 100 && dropPct > 0.1 ? "YES" : ""
-
-    rows.push({ adSystem, rev1, rev2, dropPct, dropAmt, flag })
-  }
-
-  renderTable(rows, "adSystem")
-  filterBtn.style.display = "inline-block"
-  filterBtn.textContent = "Show Only Flagged"
-  filterActive = false
-}
-
-// ---- рендер ----
-function renderTable(data, type) {
-  lastRenderedRows = data
-  resultsBody.innerHTML = ""
-
-  resetTableHeader(type)
-
-  data.forEach((row) => {
-    const tr = document.createElement("tr")
-    const isFlagged = row.flag === "YES"
-
-    if (type === "adSystem") {
-      tr.innerHTML = `
-        <td>${row.adSystem}</td>
-        <td>${row.rev1.toFixed(2)}</td>
-        <td>${row.rev2.toFixed(2)}</td>
-        <td>${(row.dropPct * 100).toFixed(1)}%</td>
-        <td style="${isFlagged ? 'color:red;font-weight:bold;' : ''}">${row.dropAmt.toFixed(2)}</td>
-        <td>${row.flag}</td>
-      `
+filterBtn.addEventListener("click", () => {
+    const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
+    isFilterActive = !isFilterActive;
+    if (isFilterActive) {
+        currentlyDisplayedRows = lastRenderedRows.filter(r => r.flag === 'YES');
+        filterBtn.textContent = "Показать все";
     } else {
-      tr.innerHTML = `
-        <td>${row.site}</td>
-        <td>${row.manager}</td>
-        <td>${row.client}</td>
-        <td>${row.rev1.toFixed(2)}</td>
-        <td>${row.rev2.toFixed(2)}</td>
-        <td>${(row.dropPct * 100).toFixed(1)}%</td>
-        <td style="${isFlagged ? 'color:red;font-weight:bold;' : ''}">${row.dropAmt.toFixed(2)}</td>
-        <td>${row.flag}</td>
-      `
+        currentlyDisplayedRows = lastRenderedRows;
+        filterBtn.textContent = "Только с флагом";
+    }
+    renderTable(currentlyDisplayedRows, groupBy);
+});
+
+// ===== ЭКСПОРТ =====
+exportBtn.addEventListener("click", () => {
+    if (currentlyDisplayedRows.length === 0) {
+        alert("Нет данных для экспорта.");
+        return;
     }
 
-    resultsBody.appendChild(tr)
-  })
-}
+    const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
+    const isSiteMode = groupBy === 'Site/Application';
 
-// ---- экспорт файла ----
-exportBtn.addEventListener("click", () => {
-  const rows = Array.from(resultsBody.querySelectorAll("tr")).map((tr) =>
-    Array.from(tr.children).map((td) => td.textContent)
-  )
+    const headers = [
+        groupBy,
+        'CS Manager',
+        'Client',
+        'Метрика',
+        `Период 1 (${period1Select.value})`,
+        `Период 2 (${period2Select.value})`,
+        '% Изменение',
+        `Флаг (по ${revenueColumnName})`
+    ];
 
-  let header = ""
-  if (fileType === "adSystem") {
-    header = "Ad system,Revenue Date 1,Revenue Date 2,% Drop,$ Drop,Flag\n"
-  } else {
-    header = "Site/Application,CS Manager,Client,Revenue Date 1,Revenue Date 2,% Drop,$ Drop,Flag\n"
-  }
+    const csvRows = [];
+    csvRows.push(headers.map(h => `"${h}"`).join(','));
 
-  const csvContent = header + rows.map((r) => r.join(",")).join("\n")
+    // для экспорта того, что видит пользователь
+    currentlyDisplayedRows.forEach(item => {
+        let isFirstRowForEntity = true;
+        for (const metricName in item.metrics) {
+            const metricData = item.metrics[metricName];
+            const row = [];
 
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-  const link = document.createElement("a")
-  link.href = URL.createObjectURL(blob)
-  link.download = "comparison_results.csv"
-  link.click()
-})
+            row.push(isFirstRowForEntity ? item.key : '');
+            if (isSiteMode) {
+                row.push(isFirstRowForEntity ? (item.meta.manager || '') : '');
+                row.push(isFirstRowForEntity ? (item.meta.client || '') : '');
+            } else {
+                row.push('');
+                row.push('');
+            }
+            row.push(metricName);
+            row.push(metricData.val1.toFixed(2));
+            row.push(metricData.val2.toFixed(2));
+            row.push(`${(metricData.changePct * 100).toFixed(2)}%`);
+            row.push(isFirstRowForEntity ? (item.flag || '') : '');
+            
+            csvRows.push(row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','));
+            isFirstRowForEntity = false;
+        }
+    });
 
-// ---- фильтр ----
-filterBtn.addEventListener("click", () => {
-  const flaggedRows = lastRenderedRows.filter((row) => row.flag === "YES")
-  renderTable(flaggedRows, fileType)
-  filterBtn.style.display = "none"
-})
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "comparison_results.csv";
+    link.click();
+});
