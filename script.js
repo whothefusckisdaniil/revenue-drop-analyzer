@@ -4,14 +4,13 @@ let parsedData = [];
 let numericHeaders = [];
 let lastRenderedRows = [];
 let currentlyDisplayedRows = [];
-let isFilterActive = false;
 let periodColumnName = '';
 let revenueColumnName = '';
 
 const csvInput = document.getElementById("csvFile");
 const compareBtn = document.getElementById("compareBtn");
 const exportBtn = document.getElementById("exportBtn");
-const filterBtn = document.getElementById("filterBtn");
+const filterSelect = document.getElementById("filterSelect");
 const resultsTable = document.getElementById("resultsTable");
 const comparisonTypeSelect = document.getElementById("comparisonType");
 const period1Select = document.getElementById("period1");
@@ -31,15 +30,23 @@ csvInput.addEventListener("change", (event) => {
             }
             const headers = Object.keys(results.data[0]);
             if (headers.includes('Date')) periodColumnName = 'Date';
-            else if (headers.includes('Month')) periodColumnName = 'Month';
             else if (headers.includes('Week')) periodColumnName = 'Week';
+            else if (headers.includes('Month')) periodColumnName = 'Month';
             else {
                 alert('Error: Could not find a period column (must be named Date, Month, or Week).');
                 return;
             }
-            parsedData = results.data.filter(row => row && row[periodColumnName] != null && (row["Site/Application"] || row["Ad system"]));
+
+            const tdsPattern = /^TDS\s+\d+$/;
+            parsedData = results.data.filter(row =>
+                row &&
+                row[periodColumnName] != null &&
+                (row["Site/Application"] || row["Ad system"]) &&
+                !tdsPattern.test(row["Site/Application"] || "")
+            );
+
             if (parsedData.length === 0) {
-                 alert(`Error: Found 0 rows with data. Please check that the file contains the column '${periodColumnName}' and that it is filled.`);
+                 alert(`Error: Found 0 rows with data. Please check that the file contains the column '${periodColumnName}' and that it is filled, or that all rows were not filtered out.`);
                  return;
             }
             const nonMetricCols = ['Date', 'Month', 'Week', 'Site/Application', 'Customer Success Manager', 'Client', 'Ad system'];
@@ -67,6 +74,7 @@ function populatePeriodSelectors() {
     const periodSet = new Set(parsedData.map(row => row[periodColumnName]));
     let availablePeriods = Array.from(periodSet);
     const dataType = availablePeriods.length > 0 ? detectDataType(availablePeriods[0]) : 'unknown';
+    
     if (dataType === 'monthly_name') {
         const monthOrder = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
         availablePeriods.sort((a, b) => {
@@ -80,13 +88,18 @@ function populatePeriodSelectors() {
     } else if (dataType === 'daily') {
         availablePeriods.sort((a, b) => new Date(b) - new Date(a));
     }
+
     period1Select.innerHTML = "";
     period2Select.innerHTML = "";
     availablePeriods.forEach(period => {
         period1Select.add(new Option(period, period));
         period2Select.add(new Option(period, period));
     });
-    if (period2Select.options.length > 1) period2Select.selectedIndex = 1;
+
+    if (period1Select.options.length > 1) {
+        period1Select.selectedIndex = 1;
+        period2Select.selectedIndex = 0;
+    }
 }
 
 compareBtn.addEventListener("click", () => {
@@ -111,30 +124,53 @@ compareBtn.addEventListener("click", () => {
             };
         }
     });
+
     const results = [];
     for (const key in dataByEntity) {
         const entityData1 = dataByEntity[key][period1];
         const entityData2 = dataByEntity[key][period2];
-        if (!entityData1 || !entityData2) continue;
         const metricsComparison = {};
-        numericHeaders.forEach(metric => {
-            const val1 = entityData1.metrics[metric] || 0;
-            const val2 = entityData2.metrics[metric] || 0;
-            const changePct = val1 !== 0 ? (val2 - val1) / val1 : 0;
-            metricsComparison[metric] = { val1, val2, changePct };
-        });
-        const rev1 = entityData1.metrics[revenueColumnName] || 0;
-        const rev2 = entityData2.metrics[revenueColumnName] || 0;
-        if (rev1 === 0) continue;
-        const dropAmt = rev1 - rev2;
-        const dropPct = (rev1 - rev2) / rev1;
-        const flag = rev2 < rev1 && dropAmt > 100 && dropPct > 0.05 ? "YES" : "";
-        results.push({ key, meta: entityData1.meta, metrics: metricsComparison, flag });
+
+        if (entityData1 && entityData2) {
+            numericHeaders.forEach(metric => {
+                const val1 = entityData1.metrics[metric] || 0;
+                const val2 = entityData2.metrics[metric] || 0;
+                const changePct = val1 !== 0 ? (val2 - val1) / val1 : (val2 > 0 ? 1 : 0);
+                metricsComparison[metric] = { val1, val2, changePct };
+            });
+
+            const rev1 = entityData1.metrics[revenueColumnName] || 0;
+            const rev2 = entityData2.metrics[revenueColumnName] || 0;
+            const dropAmt = rev1 - rev2;
+            const dropPct = rev1 !== 0 ? (rev1 - rev2) / rev1 : 0;
+            
+            let amountThreshold = 100;
+            const percentThreshold = 0.05;
+
+            if (periodColumnName === 'Date') amountThreshold = 15;
+            else if (periodColumnName === 'Week') amountThreshold = 50;
+            else if (periodColumnName === 'Month') amountThreshold = 100;
+            
+            const flag = rev2 < rev1 && dropAmt > amountThreshold && dropPct > percentThreshold ? "YES" : "";
+            results.push({ key, meta: entityData1.meta, metrics: metricsComparison, flag });
+
+        } else {
+            const flag = "NULL";
+            const existingData = entityData1 || entityData2;
+
+            numericHeaders.forEach(metric => {
+                const val1 = entityData1 ? entityData1.metrics[metric] || 0 : 0;
+                const val2 = entityData2 ? entityData2.metrics[metric] || 0 : 0;
+                const changePct = val1 !== 0 ? (val2 - val1) / val1 : (val2 > 0 ? 1 : 0);
+                metricsComparison[metric] = { val1, val2, changePct };
+            });
+            results.push({ key, meta: existingData.meta, metrics: metricsComparison, flag });
+        }
     }
+
     lastRenderedRows = results;
     currentlyDisplayedRows = results;
-    isFilterActive = false;
-    filterBtn.textContent = "Flagged Only";
+    filterSelect.value = "all";
     renderTable(results, groupBy);
 });
 
@@ -172,7 +208,8 @@ function renderTable(data, groupBy) {
             rowHtml += `<td>${metricData.val2.toFixed(2)}</td>`;
             rowHtml += `<td style="${changeColor}">${(metricData.changePct * 100).toFixed(1)}%</td>`;
             if (isFirstRowForEntity) {
-                 rowHtml += `<td rowspan="${numMetrics}" class="${item.flag === 'YES' ? 'flagged' : ''}">${item.flag}</td>`;
+                 const flagClass = item.flag === 'YES' ? 'flagged' : (item.flag === 'NULL' ? 'nulled' : '');
+                 rowHtml += `<td rowspan="${numMetrics}" class="${flagClass}">${item.flag}</td>`;
             }
             tr.innerHTML = rowHtml;
             tbody.appendChild(tr);
@@ -181,18 +218,28 @@ function renderTable(data, groupBy) {
     });
 }
 
-filterBtn.addEventListener("click", () => {
+filterSelect.addEventListener("change", () => {
     const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
-    isFilterActive = !isFilterActive;
-    if (isFilterActive) {
-        currentlyDisplayedRows = lastRenderedRows.filter(r => r.flag === 'YES');
-        filterBtn.textContent = "Show All";
-    } else {
-        currentlyDisplayedRows = lastRenderedRows;
-        filterBtn.textContent = "Flagged Only";
+    const filterValue = filterSelect.value;
+
+    switch (filterValue) {
+        case 'yes':
+            currentlyDisplayedRows = lastRenderedRows.filter(r => r.flag === 'YES');
+            break;
+        case 'null':
+            currentlyDisplayedRows = lastRenderedRows.filter(r => r.flag === 'NULL');
+            break;
+        case 'yes_null':
+            currentlyDisplayedRows = lastRenderedRows.filter(r => r.flag === 'YES' || r.flag === 'NULL');
+            break;
+        case 'all':
+        default:
+            currentlyDisplayedRows = lastRenderedRows;
+            break;
     }
     renderTable(currentlyDisplayedRows, groupBy);
 });
+
 
 // ===== EXPORT =====
 exportBtn.addEventListener("click", () => {
@@ -223,7 +270,6 @@ exportBtn.addEventListener("click", () => {
             const metricData = item.metrics[metricName];
             const row = [];
 
-            // always repeat the main info for every metric row
             row.push(item.key);
             if (isSiteMode) {
                 row.push(item.meta.manager || '');
@@ -237,8 +283,6 @@ exportBtn.addEventListener("click", () => {
             row.push(metricData.val1.toFixed(2));
             row.push(metricData.val2.toFixed(2));
             row.push(`${(metricData.changePct * 100).toFixed(2)}%`);
-            
-            // always repeat the flag for every metric row
             row.push(item.flag || '');
             
             csvRows.push(row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','));
@@ -249,6 +293,6 @@ exportBtn.addEventListener("click", () => {
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "comparison_results_flat.csv"; // changed name to reflect new format
+    link.download = "comparison_results_flat.csv";
     link.click();
 });
