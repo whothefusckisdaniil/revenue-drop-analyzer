@@ -35,6 +35,10 @@
     select, button {
       background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 14px;
       color: var(--text-color); padding: 10px 14px; font-size: 15px; transition: all 0.2s ease;
+      outline: none;
+    }
+    select:focus, button:focus {
+        border-color: var(--accent-color);
     }
     button { display: flex; align-items: center; gap: 8px; }
     button:hover { background-color: var(--accent-color); border-color: var(--accent-color); color: white; cursor: pointer; }
@@ -47,6 +51,11 @@
     th { background-color: var(--bg-color); color: var(--text-light); }
     td { color: var(--text-color); }
     td.flagged { font-weight: bold; color: var(--flag-color); }
+    .nulled {
+      background-color: #6c757d;
+      color: white;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -78,8 +87,14 @@
   <div class="control-panel">
     <button id="compareBtn"><i data-lucide="bar-chart-3"></i> Compare</button>
     <button id="exportBtn"><i data-lucide="download"></i> Export</button>
-    <button id="filterBtn"><i data-lucide="flag"></i> Flagged Only</button>
-  </div>
+
+    <select id="filterSelect">
+        <option value="all">Show All</option>
+        <option value="yes_null">(YES & NULL)</option>
+        <option value="yes">(YES Only)</option>
+        <option value="null">(NULL Only)</option>
+    </select>
+    </div>
 
   <div style="overflow-x:auto;">
     <table id="resultsTable">
