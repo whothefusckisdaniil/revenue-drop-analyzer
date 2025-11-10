@@ -1688,7 +1688,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // вызвать createIcons().
         lucide.createIcons(); 
         
-        showGlobalLoader('Загрузка данных за последний месяц...');
+        showGlobalLoader('Загрузка данных...');
         try {
             await loadDataFiles(LATEST_MONTH_FILES);
             isDefaultDataLoaded = true;
