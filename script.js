@@ -48,11 +48,11 @@ function handleFileSelect(event) {
                 return;
             }
 
-            const tdsPattern = /^TDS\s+\d+$/;
+            const tdsPattern = /^TDS(\b|\s)/i;
             parsedData = results.data.filter(row =>
                 row &&
                 row[periodColumnName] != null &&
-                (row["Site/Application"] || row["Ad system"]) &&
+                (row["Site/Application"] || row["Ad System"]) &&
                 !tdsPattern.test(row["Site/Application"] || "")
             );
 
