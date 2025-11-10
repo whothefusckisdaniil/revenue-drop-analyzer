@@ -1,78 +1,161 @@
-// запускаем иконки немедленно, если lucide уже загрузился (благодаря defer)
-if (typeof lucide !== 'undefined') {
-    lucide.createIcons();
-} else {
-    // если нет ждем window.load (самый безопасный способ)
-    window.addEventListener('load', () => {
-        lucide.createIcons();
-    });
-}
+/**
+ * @file script.js
+ * @description Core JavaScript logic for the CSV Data Analyzer & Dashboard.
+ *
+ * * ЛОГИКА ЗАГРУЗКИ (Lazy Loading v3 - ВОССТАНОВЛЕНО):
+ * 1.  **DOMContentLoaded (Синхронная часть)**:
+ * - Все DOM-элементы кэшируются.
+ * - Все слушатели событий (clicks, inputs) привязываются немедленно. Кнопки "живые".
+ * - Глобальный спиннер (уже виден из HTML) обновляет текст на "Загрузка библиотек...".
+ * 2.  **DOMContentLoaded (Асинхронная часть, `async () => { ... }`)**:
+ * - Запускается *после* синхронной части.
+ * - **ИСПРАВЛЕНО**: Добавлен `while` с 10-секундным ТАЙМ-АУТОМ, который ждет `Papa`, `Chart` и `lucide`.
+ * - *Только после этого* он запускает `loadDataFiles(LATEST_MONTH_FILES)`.
+ * - `isDefaultDataLoaded = true`.
+ * - **Прячет** глобальный спиннер.
+ * 3.  **ИСПРАВЛЕНО (Part 1): `handleFileSelect` (загрузка файла)**:
+ * - Теперь *тоже* использует `delimiter: ";"` и **стандартизирует заголовки в lowercase**,
+ * чтобы корректно читать файлы "Ad system".
+ * - Данные из этого файла *также* используются для питания Part 2 и 3.
+ * 4.  **ИСПРАВЛЕНО (График):** Сортировка дат для графика (weekly/monthly) исправлена.
+ */
+
+// ===== 1. INITIALIZATION & DOM SETUP (Analyzer) =====
+
+// (lucide.createIcons() будет вызван в DOMContentLoaded)
 
 
 // --- Global State Variables (Analyzer) ---
-let parsedData = [];
+let parsedData = []; // Stores data from the *user-uploaded* file.
 let numericHeaders = [];
 let lastRenderedRows = [];
 let currentlyDisplayedRows = [];
-let periodColumnName = '';
-let revenueColumnName = '';
+let periodColumnName = ''; // 'date', 'week', или 'month' (lowercase)
+let revenueColumnName = ''; // 'revenue ad system' (lowercase)
 
 // --- DOM Element Cache (Analyzer) ---
+// Эти переменные будут инициализированы в DOMContentLoaded
 let csvInput, compareBtn, exportBtn, resultsTable, comparisonTypeSelect,
     period1Select, period2Select, filterSelect, managerFilterSelect,
     generateReportBtn, reportOutput;
 
 
-// ===== CSV PARSING & PREPARATION (Analyzer) =====
+// ===== 2. CSV PARSING & PREPARATION (Analyzer) =====
 
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
+    
+    // Сбрасываем все старые данные
+    parsedData = [];
+    allChartData = [];
+    allChartMetrics.clear();
+    allChartEntities.clear();
+    allChartManagers.clear();
+    allChartClients.clear();
+    allAvailableDays.clear();
+    allAvailableWeeks.clear();
+    allAvailableMonths.clear();
+    minDataDate = new Date(8640000000000000); 
+    maxDataDate = new Date(-8640000000000000);
+
+    // Показываем спиннер в дэшборде, пока идет парсинг
+    dashboardLoadingStatus.innerText = "Processing file...";
+    dashboardLoadingStatus.style.display = 'block';
+    dashboardSpinner.style.display = 'block';
 
     Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        dynamicTyping: true, // Auto-detect numbers for Part 1 (File Upload)
+        delimiter: ";", // <--- ИСПРАВЛЕНИЕ: Добавлен разделитель
         complete: function (results) {
             if (!results.data.length || !results.data[0]) {
                 alert("File is empty or contains invalid data.");
+                dashboardSpinner.style.display = 'none';
                 return;
             }
-            const headers = Object.keys(results.data[0]);
+            
+            const rawData = results.data;
 
-            if (headers.includes('Date')) periodColumnName = 'Date';
-            else if (headers.includes('Week')) periodColumnName = 'Week';
-            else if (headers.includes('Month')) periodColumnName = 'Month';
+            // ===== ИСПРАВЛЕНИЕ: Стандартизируем все заголовки =====
+            const standardHeaders_P1 = Object.keys(rawData[0]).map(k => k.trim().toLowerCase());
+            const nonMetricColsStd_P1 = ['date', 'month', 'week', 'site/application', 'customer success manager', 'client', 'ad system'];
+
+            parsedData = rawData.map(row => {
+                const newRow = {};
+                for (let i = 0; i < standardHeaders_P1.length; i++) {
+                    const key = standardHeaders_P1[i];
+                    let val = row[Object.keys(row)[i]]; // Получаем оригинальное значение
+                    
+                    // Та же логика парсинга, что и в Дэшборде
+                    if (!nonMetricColsStd_P1.includes(key)) {
+                        if (typeof val === 'string') {
+                            val = parseFloat(String(val).replace(/\s/g, '').replace(',', '.'));
+                        }
+                        if (typeof val !== 'number' || isNaN(val)) {
+                            val = 0;
+                        }
+                    }
+                    newRow[key] = val;
+                }
+                return newRow;
+            });
+            // ====================================================
+
+            // Ищем стандартизированные заголовки
+            if (standardHeaders_P1.includes('date')) periodColumnName = 'date';
+            else if (standardHeaders_P1.includes('week')) periodColumnName = 'week';
+            else if (standardHeaders_P1.includes('month')) periodColumnName = 'month';
             else {
-                alert('Error: Could not find a period column (must be named Date, Month, or Week).');
+                alert('Error (Part 1): Could not find a period column (must be named Date, Month, or Week).');
+                dashboardSpinner.style.display = 'none';
                 return;
             }
 
             const tdsPattern = /^TDS(\b|\s)/i;
-            parsedData = results.data.filter(row =>
+            // Фильтруем по стандартизированным данным
+            const filteredData = parsedData.filter(row =>
                 row &&
                 row[periodColumnName] != null &&
-                (row["Site/Application"] || row["Ad System"]) &&
-                !tdsPattern.test(row["Site/Application"] || "")
+                (row["site/application"] || row["ad system"]) && // <-- ИСПРАВЛЕНО: ищем lowercase
+                !tdsPattern.test(row["site/application"] || "")
             );
+            
+            parsedData = filteredData; // Перезаписываем parsedData отфильтрованными
 
             if (parsedData.length === 0) {
-                 alert(`Error: Found 0 rows with data...`);
+                 alert(`Error (Part 1): Found 0 rows with data...`);
+                 dashboardSpinner.style.display = 'none';
                  return;
             }
-            const nonMetricCols = ['Date', 'Month', 'Week', 'Site/Application', 'Customer Success Manager', 'Client', 'Ad system'];
-            numericHeaders = Object.keys(results.data[0]).filter(key =>
-                !nonMetricCols.includes(key) && typeof results.data[0][key] === 'number');
             
-            revenueColumnName = numericHeaders.find(h => h.toLowerCase().includes('revenue'));
+            numericHeaders = standardHeaders_P1.filter(key =>
+                !nonMetricColsStd_P1.includes(key) && typeof parsedData[0][key] === 'number');
+            
+            revenueColumnName = numericHeaders.find(h => h.includes('revenue')); // .includes('revenue') уже найдет 'revenue ad system'
             if (!revenueColumnName) {
                 revenueColumnName = numericHeaders.length > 0 ? numericHeaders[0] : '';
-                alert(`Warning: 'Revenue' column not found. Flag based on '${revenueColumnName}'.`);
+                alert(`Warning (Part 1): 'Revenue' column not found. Flag based on '${revenueColumnName}'.`);
             }
             
-            populatePeriodSelectors();
-            populateManagerFilter();
-            alert(`File loaded successfully. Found ${parsedData.length} rows. Flag based on '${revenueColumnName}'.`);
+            populatePeriodSelectors(); // Эта функция теперь будет работать с 'date'
+            populateManagerFilter(); // Эта функция теперь будет работать с 'customer success manager'
+            alert(`File loaded for Analyzer. ${parsedData.length} rows processed.`);
+
+            // --- НОВАЯ ОБРАБОТКА ДЛЯ PART 2 & 3 (Dashboard & Triggers) ---
+            try {
+                // Используем `results.data` (оригинальные немодифицированные данные)
+                allChartData = processAndStandardizeData(results.data); 
+                refreshAllFilters(); // Заполняем ВСЕ фильтры (Дэшборд и Триггеры)
+                renderChart(false); // Рендерим график по умолчанию (БЕЗ дозагрузки)
+                dashboardLoadingStatus.style.display = 'none';
+                dashboardSpinner.style.display = 'none';
+            } catch (err) {
+                console.error("Error processing data for Dashboard/Triggers:", err);
+                dashboardLoadingStatus.innerText = "Error processing data.";
+                dashboardSpinner.style.display = 'none';
+            }
+            // ==========================================================
         },
     });
 }
@@ -82,7 +165,7 @@ function populateManagerFilter() {
     managerFilterSelect.innerHTML = '<option value="all">All Managers</option>';
     const managerSet = new Set(
         parsedData
-            .map(row => row['Customer Success Manager'])
+            .map(row => row['customer success manager']) // <-- ИСПРАВЛЕНО: lowercase
             .filter(Boolean)
     );
     const sortedManagers = Array.from(managerSet).sort();
@@ -131,18 +214,18 @@ function populatePeriodSelectors() {
 }
 
 
-// ===== CORE COMPARISON LOGIC (Analyzer) =====
+// ===== 3. CORE COMPARISON LOGIC (Analyzer) =====
 
 function onCompareClick() {
     const period1 = period1Select.value;
     const period2 = period2Select.value;
-    const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
+    const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'site/application' : 'ad system'; 
     if (!period1 || !period2 || period1 === period2) {
         alert("Please select two different periods to compare.");
         return;
     }
     
-    // ыmart Data Aggregation (Max Revenue)
+    // Smart Data Aggregation (Max Revenue)
     const dataByEntity = {};
     parsedData.forEach(row => {
         const period = row[periodColumnName];
@@ -154,7 +237,7 @@ function onCompareClick() {
 
         const newMetrics = {};
         numericHeaders.forEach(h => newMetrics[h] = row[h] || 0);
-        const newMeta = { manager: row['Customer Success Manager'], client: row['Client'] };
+        const newMeta = { manager: row['customer success manager'], client: row['client'] };
         const newRevenue = newMetrics[revenueColumnName] || 0;
 
         if (!dataByEntity[key]) {
@@ -173,7 +256,7 @@ function onCompareClick() {
         }
     });
 
-    // сomparison & Flagging
+    // Comparison & Flagging
     const results = [];
     for (const key in dataByEntity) {
         const entityData1 = dataByEntity[key][period1];
@@ -195,9 +278,9 @@ function onCompareClick() {
             
             let amountThreshold = 100;
             const percentThreshold = 0.05;
-            if (periodColumnName === 'Date') amountThreshold = 15;
-            else if (periodColumnName === 'Week') amountThreshold = 50;
-            else if (periodColumnName === 'Month') amountThreshold = 100;
+            if (periodColumnName === 'date') amountThreshold = 15;
+            else if (periodColumnName === 'week') amountThreshold = 50;
+            else if (periodColumnName === 'month') amountThreshold = 100;
             
             const flag = (rev2 < rev1 && dropAmt > amountThreshold && dropPct > percentThreshold) ? "YES" : "";
             results.push({ key, meta: entityData1.meta, metrics: metricsComparison, flag });
@@ -222,7 +305,7 @@ function onCompareClick() {
 }
 
 
-// ===== FILTERING & RENDERING (Analyzer) =====
+// ===== 4. FILTERING & RENDERING (Analyzer) =====
 
 function applyFiltersAndRender() {
     const flagFilterValue = filterSelect.value;
@@ -259,7 +342,8 @@ function renderTable(data, groupBy) {
     if (groupBy === 'Site/Application') {
         headerHtml += `<th>CS Manager</th><th>Client</th>`;
     }
-    headerHtml += `<th>Metric</th><th>Period 1 (${period1Select.value})</th><th>Period 2 (${period2Select.value})</th><th>% Change</th><th>Flag (on ${revenueColumnName})</th>`;
+    const prettyRevenueName = (revenueColumnName || '').charAt(0).toUpperCase() + (revenueColumnName || '').slice(1);
+    headerHtml += `<th>Metric</th><th>Period 1 (${period1Select.value})</th><th>Period 2 (${period2Select.value})</th><th>% Change</th><th>Flag (on ${prettyRevenueName})</th>`;
     thead.innerHTML = `<tr>${headerHtml}</tr>`;
     tbody.innerHTML = "";
 
@@ -284,7 +368,8 @@ function renderTable(data, groupBy) {
                 }
             }
             const changeColor = metricData.changePct < 0 ? 'color:red;' : 'color:lightgreen;';
-            rowHtml += `<td>${metricName}</td>`;
+            const prettyMetricName = metricName.charAt(0).toUpperCase() + metricName.slice(1);
+            rowHtml += `<td>${prettyMetricName}</td>`;
             rowHtml += `<td>${metricData.val1.toFixed(2)}</td>`;
             rowHtml += `<td>${metricData.val2.toFixed(2)}</td>`;
             rowHtml += `<td style="${changeColor}">${(metricData.changePct * 100).toFixed(1)}%</td>`;
@@ -299,7 +384,7 @@ function renderTable(data, groupBy) {
     });
 }
 
-// ===== EXPORT & REPORTING (Analyzer) =====
+// ===== 5. EXPORT & REPORTING (Analyzer) =====
 
 function onExportClick() {
     if (currentlyDisplayedRows.length === 0) {
@@ -308,9 +393,10 @@ function onExportClick() {
     }
     const groupBy = comparisonTypeSelect.value === 'Site/Application' ? 'Site/Application' : 'Ad system';
     const isSiteMode = groupBy === 'Site/Application';
+    const prettyRevenueName = (revenueColumnName || '').charAt(0).toUpperCase() + (revenueColumnName || '').slice(1);
     const headers = [ groupBy, 'CS Manager', 'Client', 'Metric',
         `Period 1 (${period1Select.value})`, `Period 2 (${period2Select.value})`,
-        '% Change', `Flag (on ${revenueColumnName})`];
+        '% Change', `Flag (on ${prettyRevenueName})`];
     if (!isSiteMode) {
         headers.splice(1, 2); 
     }
@@ -318,10 +404,11 @@ function onExportClick() {
     currentlyDisplayedRows.forEach(item => {
         for (const metricName in item.metrics) {
             const metricData = item.metrics[metricName];
+            const prettyMetricName = metricName.charAt(0).toUpperCase() + metricName.slice(1);
             const row = [
                 item.key,
                 ...(isSiteMode ? [item.meta.manager || '', item.meta.client || ''] : []),
-                metricName,
+                prettyMetricName,
                 metricData.val1.toFixed(2),
                 metricData.val2.toFixed(2),
                 `${(metricData.changePct * 100).toFixed(2)}%`,
@@ -378,10 +465,11 @@ function onGenerateReportClick() {
 
 // ==========================================================
 // ==========================================================
-//     ===== ЛОГИКА ДЭШБОРДА И ТРИГГЕРОВ (ОБЩАЯ) =====
+// ===== ЧАСТЬ 2 & 3: ЛОГИКА ДЭШБОРДА И ТРИГГЕРОВ (ОБЩАЯ) =====
 // ==========================================================
 // ==========================================================
 
+// --- ВОЗВРАЩАЕМ: LATEST_MONTH_FILES и ALL_OTHER_FILES ---
 const LATEST_MONTH_FILES = [
     'data_sites/november2025.csv'
 ];
@@ -396,7 +484,7 @@ const ALL_OTHER_FILES = [
 // --------------------------------------------------
 
 
-// --- глобальные переменные для Дэшборда и Триггеров ---
+// --- Глобальные переменные для Дэшборда и Триггеров ---
 let allChartData = []; // Будет хранить ВСЕ данные из ВСЕХ файлов
 let allChartMetrics = new Set();
 let allChartEntities = new Set();
@@ -406,19 +494,19 @@ let myChart = null;
 let minDataDate = new Date(8640000000000000); 
 let maxDataDate = new Date(-8640000000000000);
 
-// глобальные хранилища для агрегированных периодов
+// Глобальные хранилища для агрегированных периодов
 let allAvailableDays = new Set();
 let allAvailableWeeks = new Set();
 let allAvailableMonths = new Set();
 const ruMonths = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 
 
-// --- переменные для хранения ВЫБРАННЫХ значений ---
+// --- Переменные для хранения ВЫБРАННЫХ значений ---
 let selectedChartEntity = 'all';
 let selectedChartManager = 'all';
 let selectedChartClient = 'all';
 
-// --- глобальная переменная для статуса загрузки ---
+// --- НОВОЕ: Глобальная переменная для статуса загрузки ---
 let isDefaultDataLoaded = false;
 let isAllDataLoaded = false; 
 
@@ -430,7 +518,7 @@ let showDashboardBtn, closeDashboardBtn, dashboardView, dashboardLoadingStatus,
     dateRangeDaily, dateRangeWeekly, dateRangeMonthly, chartDateFrom, chartDateTo,
     chartWeekFrom, chartWeekTo, chartMonthFrom, chartMonthTo;
 
-// --- глобальные переменные для ТРИГГЕРОВ ---
+// --- Глобальные переменные для ТРИГГЕРОВ ---
 let triggerLastRenderedRows = [];
 let triggerCurrentlyDisplayedRows = [];
 let triggerNumericHeaders = []; 
@@ -442,16 +530,11 @@ let showTriggerViewBtn, closeTriggerViewBtn, triggerView, triggerGranularitySele
     triggerExportBtn, triggerGenerateReportBtn, triggerManagerFilter, 
     triggerFlagFilter, triggerResultsTable, triggerReportOutput;
 
-// --- DOM-элементы для ГЛОБАЛЬНОГО лоадера ---
+// --- НОВЫЕ DOM-элементы для ГЛОБАЛЬНОГО лоадера ---
 let globalLoaderOverlay, globalLoaderMessage;
 
 
-// ===== ХЕЛПЕРЫ ДЛЯ ДАТ =====
-/**
- * Получает ISO-неделю для даты.
- * @param {Date} date - Объект Date
- * @returns {string} - Форматированная строка "Неделя WW, YYYY"
- */
+// ===== НОВЫЕ ХЕЛПЕРЫ ДЛЯ ДАТ =====
 function getISOWeek(date) {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
     const dayNum = (d.getUTCDay() + 6) % 7;
@@ -465,11 +548,6 @@ function getISOWeek(date) {
     return `Неделя ${weekNum}, ${date.getFullYear()}`;
 }
 
-/**
- * Форматирует строку "YYYY-MM" в "Месяц YYYY" на русском
- * @param {string} monthYear - Строка "YYYY-MM"
- * @returns {string} - "Октябрь 2025"
- */
 function formatMonthYear(my) { // my = "2025-10"
     const [year, month] = my.split('-');
     const d = new Date(year, month - 1, 1);
@@ -477,9 +555,6 @@ function formatMonthYear(my) { // my = "2025-10"
     return formatted.charAt(0).toUpperCase() + formatted.slice(1); // "Октябрь 2025"
 }
 
-/**
- * сортировщик для недель "Неделя WW, YYYY" (от новой к старой)
- */
 function sortWeeks(a, b) { 
     const [, weekA, yearA] = a.split(/[\s,]+/);
     const [, weekB, yearB] = b.split(/[\s,]+/);
@@ -487,9 +562,6 @@ function sortWeeks(a, b) {
     return weekB - weekA;
 }
 
-/**
- * сортировщик для месяцев "Месяц YYYY" (от нового к старому)
- */
 function sortMonths(a, b) { 
     const [monthA, yearA] = a.split(' ');
     const [monthB, yearB] = b.split(' ');
@@ -497,9 +569,6 @@ function sortMonths(a, b) {
     return ruMonths.indexOf(monthB.toLowerCase()) - ruMonths.indexOf(monthA.toLowerCase());
 }
 
-/**
- * хелпер для парсинга недель "Неделя WW, YYYY" в Date (для сортировки)
- */
 function parseWeekString(weekString) {
     const [, week, year] = weekString.split(/[\s,]+/);
     const date = new Date(year, 0, 1 + (week - 1) * 7);
@@ -507,9 +576,6 @@ function parseWeekString(weekString) {
     else date.setDate(date.getDate() + 8 - date.getDay());
     return date;
 }
-/**
- * хелпер для парсинга месяцев "Месяц YYYY" в Date (для сортировки)
- */
 function parseMonthString(monthString) {
     const [month, year] = monthString.split(' ');
     return new Date(year, ruMonths.indexOf(month.toLowerCase()), 1);
@@ -681,8 +747,9 @@ async function loadDataFiles(fileList) {
         
     } catch (error) {
         console.error("Error loading chart data:", error);
-        alert(`Error: ${error.message}`);
-        return false;
+        // ===== ИСПРАВЛЕНИЕ: Пробрасываем ошибку =====
+        throw error;
+        // ==========================================
     }
 }
 
@@ -774,7 +841,10 @@ async function ensureAllDataIsLoaded(loaderType = 'global') {
  * Устанавливает мин/макс и значения по умолчанию для полей выбора дат.
  */
 function setDefaultDateRanges() {
-    if (!minDataDate || !maxDataDate || minDataDate > maxDataDate) return;
+    if (!minDataDate || !maxDataDate || minDataDate > maxDataDate) {
+        console.warn("Min/Max dates not set, skipping default ranges.");
+        return;
+    }
 
     const toISODate = (date) => date.toISOString().split('T')[0];
     const toISOMonth = (date) => date.toISOString().substring(0, 7);
@@ -905,14 +975,12 @@ function processDataForChart() {
     if (granularity === 'daily') {
         sortedKeys = Array.from(aggregationMap.keys()).sort((a,b) => new Date(a) - new Date(b));
     } else if (granularity === 'weekly') {
-        // ИСПРАВЛЕНИЕ: sortWeeks(b,a) -> старые к новым
-        sortedKeys = Array.from(aggregationMap.keys()).sort((a,b) => sortWeeks(b,a)); 
+        // ИСПРАВЛЕНИЕ: Сортируем по дате, а не по строке
+        sortedKeys = Array.from(aggregationMap.keys()).sort((a,b) => parseWeekString(a) - parseWeekString(b)); 
     } else { // monthly
-        // ИСПРАВЛЕНИЕ: sortMonths(b,a) -> старые к новым
-        sortedKeys = Array.from(aggregationMap.keys()).sort((a,b) => sortMonths(b,a));
+        // ИСПРАВЛЕНИЕ: Сортируем по дате, а не по строке
+        sortedKeys = Array.from(aggregationMap.keys()).sort((a,b) => parseMonthString(a) - parseMonthString(b));
     }
-    // sortedKeys.reverse(); // <--- ИСПРАВЛЕНИЕ: ЭТА СТРОКА БЫЛА ОШИБКОЙ
-    // ========================================================
 
     const labels = sortedKeys;
     const data = sortedKeys.map(key => {
@@ -932,11 +1000,16 @@ function processDataForChart() {
 /**
  * Рисует или обновляет график на canvas
  */
-async function renderChart() {
+async function renderChart(ensureData = true) { // <--- ИЗМЕНЕНИЕ: 'ensureData' по умолчанию true
     // 1. Проверяем, нужно ли дозагрузить ВСЕ данные
-    await ensureAllDataIsLoaded('dashboard'); // 'dashboard' использует внутренний спиннер
+    if (ensureData) {
+        await ensureAllDataIsLoaded('dashboard'); 
+    }
 
-    if (allChartData.length === 0) return; 
+    if (allChartData.length === 0) {
+        dashboardLoadingStatus.innerText = "No data loaded. Please upload a file.";
+        return; 
+    }
 
     dashboardSpinner.style.display = 'block';
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -1498,7 +1571,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await loadDataFiles(LATEST_MONTH_FILES);
                 isDefaultDataLoaded = true;
                 refreshAllFilters(); // <--- Обновляем фильтры с дефолтными данными
-                await renderChart(); // <--- Рисуем график
+                await renderChart(false); // <--- Рисуем график (false = не дозагружать)
             } catch (err) {
                 console.error("Failed to lazy-load data:", err);
                 alert('Не удалось загрузить данные: ' + err.message);
@@ -1555,7 +1628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dateRangeWeekly.style.display = granularity === 'weekly' ? 'flex' : 'none';
         dateRangeMonthly.style.display = granularity === 'monthly' ? 'flex' : 'none';
     });
-    reloadChartBtn.addEventListener('click', renderChart); // renderChart теперь async и сам вызовет ensureAllDataIsLoaded
+    reloadChartBtn.addEventListener('click', () => renderChart(true)); // renderChart(true) = проверить и дозагрузить
 
     // Part 3 (Triggers)
     showTriggerViewBtn.addEventListener('click', async () => {
@@ -1596,26 +1669,41 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== НОВОЕ: ЗАПУСК ПРИЛОЖЕНИЯ =====
     (async () => {
         // Ждем, пока `defer` скрипты (PapaParse, Chart.js, lucide) точно загрузятся
-        // Это необходимо, т.к. DOMContentLoaded может сработать раньше них.
+        const startTime = Date.now();
+        const timeout = 10000; // 10 секунд
+        
+        globalLoaderMessage.textContent = "Загрузка библиотек...";
+        
         while (typeof Papa === 'undefined' || typeof Chart === 'undefined' || typeof lucide === 'undefined') {
+            if (Date.now() - startTime > timeout) {
+                globalLoaderMessage.textContent = "Ошибка: Не удалось загрузить библиотеки. Проверьте сеть.";
+                globalLoaderMessage.style.color = 'var(--flag-color)';
+                document.getElementById('globalSpinner').style.display = 'none';
+                return; // Останавливаем выполнение
+            }
             await new Promise(r => setTimeout(r, 50)); // Ждем 50ms
         }
         
-        lucide.createIcons(); // Теперь 100% безопасно
+        // Теперь, когда библиотеки 100% загружены, мы можем безопасно
+        // вызвать createIcons().
+        lucide.createIcons(); 
         
-        showGlobalLoader('Загрузка данных...');
+        showGlobalLoader('Загрузка данных за последний месяц...');
         try {
             await loadDataFiles(LATEST_MONTH_FILES);
             isDefaultDataLoaded = true;
             refreshAllFilters(); // Обновляем *все* фильтры с данными по умолчанию
             
             // Сразу рендерим график по умолчанию (но не показываем его)
-            await renderChart(); 
+            await renderChart(false); // (false = не дозагружать)
             dashboardLoadingStatus.style.display = 'none';
         } catch (err) {
             console.error("Failed to load initial data:", err);
             globalLoaderMessage.textContent = 'Ошибка загрузки данных: ' + err.message;
-            // Не прячем лоадер, если ошибка
+            // ИСПРАВЛЕНИЕ: Прячем лоадер при ошибке
+            setTimeout(() => {
+                hideGlobalLoader();
+            }, 5000);
             return;
         }
         hideGlobalLoader();
