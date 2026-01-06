@@ -471,7 +471,7 @@ function onGenerateReportClick() {
 
 // --- ВОЗВРАЩАЕМ: LATEST_MONTH_FILES и ALL_OTHER_FILES ---
 const LATEST_MONTH_FILES = [
-    'data_sites/december2025.csv'
+    'data_sites/january2026.csv'
 ];
 
 const ALL_OTHER_FILES = [
@@ -480,7 +480,8 @@ const ALL_OTHER_FILES = [
     'data_sites/august2025.csv',
     'data_sites/september2025.csv', 
     'data_sites/october2025.csv',
-    'data_sites/november2025.csv'
+    'data_sites/november2025.csv',
+    'data_sites/december2025.csv'
 ];
 // --------------------------------------------------
 
