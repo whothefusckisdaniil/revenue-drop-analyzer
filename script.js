@@ -282,11 +282,14 @@ function onCompareClick() {
             else if (periodColumnName === 'week') amountThreshold = 50;
             else if (periodColumnName === 'month') amountThreshold = 100;
             
-            const flag = (rev2 < rev1 && dropAmt > amountThreshold && dropPct > percentThreshold) ? "YES" : "";
+            const flag = (rev1 >= 1 && rev2 === 0)
+                ? "TURNED OFF"
+                : ((rev2 < rev1 && dropAmt > amountThreshold && dropPct > percentThreshold) ? "YES" : "");
             results.push({ key, meta: entityData1.meta, metrics: metricsComparison, flag });
         
         } else {
-            const flag = "NULL";
+            const rev1 = entityData1 ? entityData1.metrics[revenueColumnName] || 0 : 0;
+            const flag = (entityData1 && !entityData2 && rev1 >= 1) ? "TURNED OFF" : "NULL";
             const existingData = entityData1 || entityData2;
             numericHeaders.forEach(metric => {
                 const val1 = entityData1 ? entityData1.metrics[metric] || 0 : 0;
@@ -1292,11 +1295,14 @@ async function onTriggerCompareClick() {
             if (granularity === 'weekly') amountThreshold = 50;
             const percentThreshold = 0.05;
             
-            const flag = (rev2 < rev1 && dropAmt > amountThreshold && dropPct > percentThreshold) ? "YES" : "";
+            const flag = (rev1 >= 1 && rev2 === 0)
+                ? "TURNED OFF"
+                : ((rev2 < rev1 && dropAmt > amountThreshold && dropPct > percentThreshold) ? "YES" : "");
             results.push({ key, meta: entityData1.meta, metrics: metricsComparison, flag });
         
         } else {
-            const flag = "NULL";
+            const rev1 = entityData1 ? entityData1.metrics[triggerRevenueColumnName] || 0 : 0;
+            const flag = (entityData1 && !entityData2 && rev1 >= 1) ? "TURNED OFF" : "NULL";
             const existingData = entityData1 || entityData2;
             triggerNumericHeaders.forEach(metric => {
                 const val1 = entityData1 ? entityData1.metrics[metric] || 0 : 0;
